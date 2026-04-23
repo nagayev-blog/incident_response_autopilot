@@ -1,0 +1,70 @@
+{
+  "version": "4",
+  "groupKey": "{}:{alertname=\"ETLPipelineFailure\"}",
+  "status": "firing",
+  "receiver": "incident-autopilot-webhook",
+  "groupLabels": {"alertname": "ETLPipelineFailure"},
+  "commonLabels": {
+    "alertname": "ETLPipelineFailure",
+    "env": "production",
+    "namespace": "data-platform",
+    "service": "data-sync-service",
+    "severity": "high",
+    "team": "data-engineering"
+  },
+  "commonAnnotations": {
+    "summary": "Nightly ETL job failed — analytics dashboards showing stale data",
+    "description": "ETL job 'operational_to_analytics_sync' did not complete. Running 4x longer than SLA (14400s vs 1800s norm). Last successful sync 6 hours ago. Deadlock detected on source DB.",
+    "runbook_url": "https://wiki.internal/runbooks/etl-pipeline-failure"
+  },
+  "externalURL": "https://alertmanager.internal",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "ETLPipelineFailure",
+        "job_name": "operational_to_analytics_sync",
+        "namespace": "data-platform",
+        "service": "data-sync-service",
+        "severity": "high"
+      },
+      "annotations": {
+        "summary": "ETL job stalled — possible deadlock",
+        "description": "etl_job_duration_seconds=14400, etl_job_sla_seconds=1800, etl_last_success_timestamp_lag_hours=6.2, deadlock_errors=3"
+      },
+      "startsAt": "2026-04-22T02:05:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "fingerprint": "b2c3d4e5f6a1b2c4"
+    }
+  ],
+  "incident_context": {
+    "incident_id": "INC-2026-0422-005",
+    "detected_at": "2026-04-22T02:05:00Z",
+    "affected_services": ["data-sync-service", "analytics-api", "grafana-dashboards"],
+    "recent_changes": [
+      {
+        "type": "batch_job",
+        "description": "Monthly batch recalculation of client risk scores started at 01:00",
+        "started_at": "2026-04-22T01:00:00Z",
+        "status": "running",
+        "locks_held_on": ["client_profiles", "transaction_history"]
+      }
+    ],
+    "current_metrics": {
+      "etl_job_duration_seconds": 14400,
+      "etl_job_sla_seconds": 1800,
+      "etl_last_success_lag_hours": 6.2,
+      "deadlock_errors_total": 3,
+      "source_db_lock_wait_ms_avg": 28000,
+      "rows_processed": 1240000,
+      "rows_total_estimate": 8700000,
+      "analytics_data_freshness_hours": 6.2
+    },
+    "business_impact": {
+      "stale_dashboards": true,
+      "analytics_data_lag_hours": 6.2,
+      "affected_analyst_users": 120,
+      "morning_reports_at_risk": true
+    }
+  }
+}

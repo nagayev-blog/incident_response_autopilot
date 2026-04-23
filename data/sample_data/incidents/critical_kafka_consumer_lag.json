@@ -1,0 +1,102 @@
+{
+  "version": "4",
+  "groupKey": "{}:{alertname=\"KafkaConsumerLagCritical\"}",
+  "truncatedAlerts": 0,
+  "status": "firing",
+  "receiver": "incident-autopilot-webhook",
+  "groupLabels": {
+    "alertname": "KafkaConsumerLagCritical"
+  },
+  "commonLabels": {
+    "alertname": "KafkaConsumerLagCritical",
+    "env": "production",
+    "namespace": "notifications",
+    "service": "notification-service",
+    "severity": "critical",
+    "team": "user-communications"
+  },
+  "commonAnnotations": {
+    "summary": "Kafka consumer lag critical: notification-service falling behind on user-events topic",
+    "description": "Consumer lag on topic 'user-events' reached 500,000 messages. Notifications delayed 2+ hours. JVM heap at 95%, GC pauses >5s causing consumer poll timeout.",
+    "runbook_url": "https://wiki.internal/runbooks/kafka-consumer-lag"
+  },
+  "externalURL": "https://alertmanager.internal",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "KafkaConsumerLagCritical",
+        "consumer_group": "notification-service-consumer",
+        "env": "production",
+        "namespace": "notifications",
+        "service": "notification-service",
+        "severity": "critical",
+        "topic": "user-events"
+      },
+      "annotations": {
+        "summary": "Kafka consumer lag critical",
+        "description": "kafka_consumer_lag=500421, lag_growing_rate=+2300/min, estimated_catch_up_hours=3.6"
+      },
+      "startsAt": "2026-04-22T01:05:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "https://prometheus.internal/graph?g0.expr=kafka_consumer_lag",
+      "fingerprint": "c3d4e5f6a1b2c3d4"
+    },
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "JVMHeapCritical",
+        "env": "production",
+        "namespace": "notifications",
+        "service": "notification-service",
+        "severity": "critical"
+      },
+      "annotations": {
+        "summary": "JVM heap usage critical on notification-service",
+        "description": "Heap 95% used (3891MB/4096MB). Full GC triggered every 45s. GC pause duration 5.2-8.7s causing Kafka poll timeout and partition rebalance."
+      },
+      "startsAt": "2026-04-22T01:03:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "https://prometheus.internal/graph?g0.expr=jvm_memory_used_bytes",
+      "fingerprint": "d4e5f6a1b2c3d4e5"
+    }
+  ],
+  "incident_context": {
+    "incident_id": "INC-2026-0422-002",
+    "detected_at": "2026-04-22T01:05:00Z",
+    "affected_services": ["notification-service", "email-sender-service", "push-gateway"],
+    "recent_changes": [
+      {
+        "type": "config_change",
+        "service": "email-sender-service",
+        "change": "SMTP connection timeout increased from 5s to 30s",
+        "changed_at": "2026-04-21T22:30:00Z",
+        "changed_by": "ops-team"
+      },
+      {
+        "type": "external",
+        "description": "Third-party SMS gateway latency increased from 200ms to 4500ms (vendor incident)",
+        "detected_at": "2026-04-22T00:48:00Z"
+      }
+    ],
+    "current_metrics": {
+      "kafka_consumer_lag": 500421,
+      "kafka_consumer_lag_growth_per_minute": 2300,
+      "kafka_messages_consumed_per_second": 12,
+      "kafka_messages_produced_per_second": 51,
+      "jvm_heap_used_mb": 3891,
+      "jvm_heap_max_mb": 4096,
+      "jvm_gc_pause_seconds_p99": 7.2,
+      "jvm_gc_collections_per_minute": 1.3,
+      "external_sms_latency_ms": 4500,
+      "notification_delivery_delay_minutes": 134,
+      "pod_restarts": 2
+    },
+    "business_impact": {
+      "undelivered_notifications": 500421,
+      "affected_users_estimate": 48000,
+      "sla_breach": true,
+      "sla_threshold_minutes": 15
+    }
+  }
+}

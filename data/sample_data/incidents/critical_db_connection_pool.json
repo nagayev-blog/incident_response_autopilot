@@ -1,0 +1,98 @@
+{
+  "version": "4",
+  "groupKey": "{}:{alertname=\"DBConnectionPoolExhausted\"}",
+  "truncatedAlerts": 0,
+  "status": "firing",
+  "receiver": "incident-autopilot-webhook",
+  "groupLabels": {
+    "alertname": "DBConnectionPoolExhausted"
+  },
+  "commonLabels": {
+    "alertname": "DBConnectionPoolExhausted",
+    "env": "production",
+    "namespace": "payments",
+    "service": "payment-processing-service",
+    "severity": "critical",
+    "team": "payments-platform"
+  },
+  "commonAnnotations": {
+    "summary": "PostgreSQL connection pool exhausted in payment-processing-service",
+    "description": "Active DB connections reached 100/100 (pool limit). New requests are queuing and timing out. HTTP 503 errors on /api/payments endpoint. Incident started at 2026-04-22T03:17:00Z.",
+    "runbook_url": "https://wiki.internal/runbooks/db-connection-pool"
+  },
+  "externalURL": "https://alertmanager.internal",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "DBConnectionPoolExhausted",
+        "env": "production",
+        "instance": "payment-processing-service-7d9f8b-xk2pq",
+        "namespace": "payments",
+        "pod": "payment-processing-service-7d9f8b-xk2pq",
+        "service": "payment-processing-service",
+        "severity": "critical"
+      },
+      "annotations": {
+        "summary": "DB connection pool exhausted",
+        "description": "pg_connections_active=100, pg_connections_max=100, http_errors_5xx_rate=0.87, latency_p99_ms=31500"
+      },
+      "startsAt": "2026-04-22T03:17:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "https://prometheus.internal/graph?g0.expr=pg_connections_active",
+      "fingerprint": "a1b2c3d4e5f6a1b2"
+    },
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "HighErrorRate",
+        "env": "production",
+        "instance": "payment-processing-service-7d9f8b-xk2pq",
+        "namespace": "payments",
+        "service": "payment-processing-service",
+        "severity": "critical"
+      },
+      "annotations": {
+        "summary": "High HTTP 5xx error rate on payment-processing-service",
+        "description": "Error rate 87% on /api/payments (threshold: 5%). Triggered simultaneously with DB pool exhaustion."
+      },
+      "startsAt": "2026-04-22T03:18:42Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "https://prometheus.internal/graph?g0.expr=http_errors_5xx_rate",
+      "fingerprint": "b2c3d4e5f6a1b2c3"
+    }
+  ],
+  "incident_context": {
+    "incident_id": "INC-2026-0422-001",
+    "detected_at": "2026-04-22T03:17:00Z",
+    "affected_services": ["payment-processing-service", "order-service", "api-gateway"],
+    "recent_changes": [
+      {
+        "type": "deployment",
+        "service": "payment-processing-service",
+        "version": "v2.14.1",
+        "deployed_at": "2026-04-22T02:45:00Z",
+        "deployed_by": "ci-cd-pipeline",
+        "commit": "fix: add retry logic for payment gateway timeouts"
+      }
+    ],
+    "current_metrics": {
+      "pg_connections_active": 100,
+      "pg_connections_max": 100,
+      "pg_connections_idle": 0,
+      "http_requests_per_second": 142,
+      "http_errors_5xx_rate": 0.87,
+      "latency_p50_ms": 8200,
+      "latency_p95_ms": 24100,
+      "latency_p99_ms": 31500,
+      "jvm_heap_used_mb": 1820,
+      "jvm_heap_max_mb": 2048,
+      "pod_restarts": 0
+    },
+    "business_impact": {
+      "affected_users_estimate": 3400,
+      "failed_transactions_per_minute": 124,
+      "revenue_impact_per_minute_rub": 186000
+    }
+  }
+}

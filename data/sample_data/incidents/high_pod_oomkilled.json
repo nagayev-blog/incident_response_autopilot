@@ -1,0 +1,72 @@
+{
+  "version": "4",
+  "groupKey": "{}:{alertname=\"PodOOMKilledLoop\"}",
+  "truncatedAlerts": 0,
+  "status": "firing",
+  "receiver": "incident-autopilot-webhook",
+  "groupLabels": {
+    "alertname": "PodOOMKilledLoop"
+  },
+  "commonLabels": {
+    "alertname": "PodOOMKilledLoop",
+    "env": "production",
+    "namespace": "reporting",
+    "service": "report-generation-service",
+    "severity": "high",
+    "team": "analytics-platform"
+  },
+  "commonAnnotations": {
+    "summary": "report-generation-service pod OOMKilled, CrashLoopBackOff",
+    "description": "Pod killed by OOM every 3-5 minutes. Memory limit 512Mi consistently breached when processing large reports. 14 restarts in last hour.",
+    "runbook_url": "https://wiki.internal/runbooks/pod-oomkilled"
+  },
+  "externalURL": "https://alertmanager.internal",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "PodOOMKilledLoop",
+        "env": "production",
+        "namespace": "reporting",
+        "pod": "report-generation-service-6c8d9f-m3np7",
+        "service": "report-generation-service",
+        "severity": "high"
+      },
+      "annotations": {
+        "summary": "Pod in CrashLoopBackOff due to OOMKilled",
+        "description": "kube_pod_container_status_restarts_total=14, memory_limit_mi=512, last_oom_trigger=report_export_xlsx_handler"
+      },
+      "startsAt": "2026-04-22T08:12:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "https://prometheus.internal/graph?g0.expr=kube_pod_container_status_restarts_total",
+      "fingerprint": "e5f6a1b2c3d4e5f6"
+    }
+  ],
+  "incident_context": {
+    "incident_id": "INC-2026-0422-003",
+    "detected_at": "2026-04-22T08:12:00Z",
+    "affected_services": ["report-generation-service"],
+    "recent_changes": [
+      {
+        "type": "feature",
+        "description": "New report type added: 'full_portfolio_export' — exports all client transactions for past 3 years into XLSX",
+        "deployed_at": "2026-04-21T18:00:00Z",
+        "deployed_by": "feature/portfolio-export branch"
+      }
+    ],
+    "current_metrics": {
+      "pod_restarts_last_hour": 14,
+      "memory_limit_mi": 512,
+      "memory_at_oom_mi": 511,
+      "avg_restart_interval_minutes": 4.1,
+      "report_requests_in_queue": 37,
+      "largest_report_rows": 2400000,
+      "http_5xx_rate": 0.34
+    },
+    "business_impact": {
+      "queued_report_requests": 37,
+      "affected_users": 37,
+      "service_degraded": true
+    }
+  }
+}

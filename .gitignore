@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Env
+.env
+.env.*
+!.env.example
+
+# ChromaDB (локальная база, не коммитим)
+data/chroma_db/
+
+# Claude Code
+.claude/settings.local.json
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
