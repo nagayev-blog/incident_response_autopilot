@@ -183,31 +183,37 @@ def _stream_graph(
     config = {"configurable": {"thread_id": thread_id}}
     completed: dict[str, Any] = dict(st.session_state.completed)
 
-    # ── Плейсхолдеры для live-обновлений ──────────────────────────────────────
-    ph_step1 = st.empty()
-    ph_step2 = st.empty()
-    ph_step3 = st.empty()
-    ph_step4 = st.empty()
-
     # Ссылки на status-контейнеры второго шага (для fan-in)
     step2_status: Any = None
     step2_diag_ph: Any = None
     step2_hist_ph: Any = None
     step2_done: set[str] = set()
 
+    # ── Плейсхолдеры: порядок зависит от режима ───────────────────────────────
+    # В resume-режимах статические шаги рендерятся первыми, плейсхолдеры создаются
+    # ПОСЛЕ — иначе st.empty() занял бы позицию выше статического контента.
     if resume_after_feedback:
         _render_completed_steps(completed, stage="resuming_feedback")
+        ph_step1 = ph_step2 = ph_step4 = st.empty()   # не используются в этом режиме
+        ph_step3 = st.empty()                          # перегенерация — внизу ✓
         ph_step3.status("⏳ Шаг 3 — Перегенерация плана", state="running", expanded=True).write(
             "Учитываю замечания инженера, формирую новый план..."
         )
     elif resume:
         _render_completed_steps(completed, stage="resuming")
+        ph_step1 = ph_step2 = ph_step3 = st.empty()   # не используются в этом режиме
+        ph_step4 = st.empty()                          # постмортем — внизу ✓
         ph_step4.status("⏳ Шаг 4 — Postmortem", state="running", expanded=True).write(
             "Формирую финальный постмортем..."
         )
     else:
-        s1 = ph_step1.status("⏳ Шаг 1 — Triage", state="running", expanded=True)
-        s1.write("Анализирую алерт, определяю severity...")
+        ph_step1 = st.empty()
+        ph_step2 = st.empty()
+        ph_step3 = st.empty()
+        ph_step4 = st.empty()
+        ph_step1.status("⏳ Шаг 1 — Triage", state="running", expanded=True).write(
+            "Анализирую алерт, определяю severity..."
+        )
 
     # ── Стрим ─────────────────────────────────────────────────────────────────
     input_state = None if (resume or resume_after_feedback) else IncidentState(alert=alert)
@@ -312,10 +318,10 @@ def _finalize_step2(ph_step2: Any, step2_status: Any, completed: dict, ph_step3:
 def _render_approval_ui(thread_id: str) -> None:
     """Форма подтверждения / отклонения плана реагирования."""
     config = {"configurable": {"thread_id": thread_id}}
-    st.warning("### ⚠️ Human Approval Required")
+    st.warning("### ⚠️ Подтвердите выполнение плана")
     st.markdown(
-        "Проверьте план реагирования выше. Если план корректен и вы готовы его применить — "
-        "подтвердите. После этого система зафиксирует инцидент в постмортеме."
+        "Подтвердите, что план реагирования выполнен и инцидент устранён — "
+        "после этого система зафиксирует произошедшее в постмортеме."
     )
     col1, col2 = st.columns(2)
     with col1:
