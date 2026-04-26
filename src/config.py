@@ -1,3 +1,5 @@
+import os
+
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -16,7 +18,8 @@ class Settings(BaseSettings):
 
     # LangSmith
     langsmith_api_key: str = ""
-    langsmith_project: str = "incident-response-autopilot"
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+    langsmith_project: str = "incident-autopilot"
     langsmith_tracing: bool = False
 
     # ChromaDB
@@ -31,3 +34,10 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Прокидываем LangSmith-переменные в окружение — LangGraph читает их напрямую из os.environ
+if settings.langsmith_tracing and settings.langsmith_api_key:
+    os.environ.setdefault("LANGSMITH_TRACING", "true")
+    os.environ.setdefault("LANGSMITH_ENDPOINT", settings.langsmith_endpoint)
+    os.environ.setdefault("LANGSMITH_API_KEY", settings.langsmith_api_key)
+    os.environ.setdefault("LANGSMITH_PROJECT", settings.langsmith_project)
