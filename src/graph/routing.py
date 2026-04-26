@@ -35,7 +35,12 @@ def routing_after_history(state: IncidentState) -> str:
 
 
 def routing_after_human_approval(state: IncidentState) -> str:
-    """Conditional edge после human_approval."""
+    """Conditional edge после human_approval.
+
+    Если инженер отклонил план, но оставил фидбек — перегенерируем response.
+    """
     if state.get("human_approved"):
         return "postmortem"
+    if state.get("engineer_feedback"):
+        return "response"
     return END  # type: ignore[return-value]

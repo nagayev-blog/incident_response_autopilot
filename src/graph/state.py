@@ -16,4 +16,5 @@ class IncidentState(TypedDict, total=False):
     response_plan: str                            # план реагирования; заполняет response / suggestion
     human_approved: bool                          # True после подтверждения инженером
     postmortem: str                               # финальный текст постмортема
+    engineer_feedback: str                              # замечания инженера при Reject; очищается после ResponseAgent
     metrics: Annotated[dict[str, Any], _merge_dicts]  # latency/tokens/cost; мёрж из параллельных узлов

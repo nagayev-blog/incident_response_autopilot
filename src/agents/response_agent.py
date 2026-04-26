@@ -31,6 +31,7 @@ def response_node(state: IncidentState) -> dict[str, Any]:
                 severity=state.get("severity", "HIGH"),
                 diagnosis=state.get("diagnosis", ""),
                 similar_incidents=state.get("similar_incidents", []),
+                engineer_feedback=state.get("engineer_feedback", ""),
             ),
         }],
         output_format=ResponseOutput,
@@ -50,6 +51,7 @@ def response_node(state: IncidentState) -> dict[str, Any]:
 
     return {
         "response_plan": response_plan,
+        "engineer_feedback": "",   # сбрасываем после использования
         "metrics": {
             "response": {
                 "latency_s": round(latency, 3),

@@ -21,6 +21,7 @@ def build_user_prompt(
     severity: str,
     diagnosis: str,
     similar_incidents: list[dict[str, Any]],
+    engineer_feedback: str = "",
 ) -> str:
     alert_lines = "\n".join(f"  {k}: {v}" for k, v in alert.items() if not k.startswith("_mock"))
 
@@ -32,9 +33,17 @@ def build_user_prompt(
         )
         history_text = f"Похожие инциденты:\n{items}"
 
+    feedback_section = ""
+    if engineer_feedback:
+        feedback_section = (
+            f"\n\n⚠️ ЗАМЕЧАНИЕ ИНЖЕНЕРА К ПРЕДЫДУЩЕМУ ПЛАНУ:\n{engineer_feedback}\n"
+            "Учти это замечание и скорректируй план реагирования."
+        )
+
     return (
         f"Severity: {severity}\n\n"
         f"Alert:\n{alert_lines}\n\n"
         f"Diagnosis:\n{diagnosis}\n\n"
         f"{history_text}"
+        f"{feedback_section}"
     )
