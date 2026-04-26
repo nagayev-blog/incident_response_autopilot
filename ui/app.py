@@ -125,10 +125,21 @@ def _render_response_content(output: dict[str, Any]) -> None:
 
 
 def _render_postmortem_content(output: dict[str, Any]) -> None:
-    st.code(output.get("postmortem", ""), language="markdown")
-    m = output.get("metrics", {}).get("postmortem", {})
-    if m:
-        st.caption(f"⏱ {m.get('latency_s', '?')}s · {m.get('input_tokens', '-')}/{m.get('output_tokens', '-')} tok")
+    text = output.get("postmortem", "")
+    st.code(text, language="markdown")
+    col_dl, col_metrics = st.columns([1, 3])
+    with col_dl:
+        st.download_button(
+            label="⬇️ Скачать .md",
+            data=text.encode("utf-8"),
+            file_name="postmortem.md",
+            mime="text/markdown",
+            use_container_width=True,
+        )
+    with col_metrics:
+        m = output.get("metrics", {}).get("postmortem", {})
+        if m:
+            st.caption(f"⏱ {m.get('latency_s', '?')}s · {m.get('input_tokens', '-')}/{m.get('output_tokens', '-')} tok")
 
 
 def _render_suggestion_content(output: dict[str, Any]) -> None:
