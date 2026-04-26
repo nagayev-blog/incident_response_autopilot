@@ -283,12 +283,12 @@ def _stream_graph(alert: dict[str, Any], thread_id: str, resume: bool = False) -
             st.divider()
             st.warning("### ⚠️ Human Approval Required")
             st.markdown(
-                "Инцидент **CRITICAL**. Подтвердите или отклоните план "
-                "реагирования перед запуском постмортема."
+                "Проверьте план реагирования выше. Если план корректен и вы готовы его применить — "
+                "подтвердите. После этого система зафиксирует инцидент в постмортеме."
             )
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("✅ Approve", type="primary", use_container_width=True, key="approve_live"):
+                if st.button("✅ План корректен, фиксируем", type="primary", use_container_width=True, key="approve_live"):
                     graph.update_state(config, {"human_approved": True})
                     st.session_state.stage = "resuming"
                     st.rerun()
@@ -407,12 +407,12 @@ def main() -> None:
         st.divider()
         st.warning("### ⚠️ Human Approval Required")
         st.markdown(
-            "Инцидент **CRITICAL**. Подтвердите или отклоните план "
-            "реагирования перед запуском постмортема."
+            "Проверьте план реагирования выше. Если план корректен и вы готовы его применить — "
+            "подтвердите. После этого система зафиксирует инцидент в постмортеме."
         )
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("✅ Approve", type="primary", use_container_width=True):
+            if st.button("✅ План корректен, фиксируем", type="primary", use_container_width=True):
                 config = {"configurable": {"thread_id": st.session_state.thread_id}}
                 graph.update_state(config, {"human_approved": True})
                 st.session_state.stage = "resuming"
