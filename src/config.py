@@ -21,7 +21,9 @@ class Settings(BaseSettings):
 
     # ChromaDB
     chroma_db_path: str = "./data/chroma_db"
+    chroma_collection_name: str = "knowledge_base"
     rag_top_k: int = 5
+    rag_min_chunk_len: int = 80
 
     # Timeouts / retries
     llm_timeout_seconds: int = 60
