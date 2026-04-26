@@ -15,8 +15,12 @@
 """
 
 import json
+import logging
 import uuid
+from pathlib import Path
 from typing import Any
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
 import streamlit as st
 
@@ -27,23 +31,28 @@ from src.graph.workflow import graph
 
 SEV_ICON = {"CRITICAL": "🔴", "HIGH": "🟠", "LOW": "🟡"}
 
-SAMPLE_ALERTS = {
-    "CRITICAL — DB down": {
-        "id": "alert-001",
-        "service": "payments-db",
-        "message": "DB connection pool exhausted, 0 connections available, 500 errors/sec",
-    },
-    "HIGH — Latency spike": {
-        "id": "alert-002",
-        "service": "checkout-service",
-        "message": "Error rate 35%, p99 latency 8000ms, partial outage in EU region",
-    },
-    "LOW — Disk usage": {
-        "id": "alert-003",
-        "service": "storage-01",
-        "message": "Disk usage at 78%, warning threshold",
-    },
-}
+_INCIDENTS_DIR = Path("data/sample_data/incidents")
+_CUSTOM_LABEL = "— кастомный —"
+_CUSTOM_DEFAULT = {"id": "alert-000", "service": "my-service", "message": "Something went wrong"}
+
+
+@st.cache_data
+def _load_sample_alerts() -> dict[str, dict]:
+    """Загружает JSON-алерты из папки incidents. Кэшируется на время сессии."""
+    alerts: dict[str, dict] = {}
+    if not _INCIDENTS_DIR.exists():
+        return alerts
+    for path in sorted(_INCIDENTS_DIR.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            severity = data.get("commonLabels", {}).get("severity", "unknown").upper()
+            alertname = data.get("commonLabels", {}).get("alertname", path.stem)
+            icon = SEV_ICON.get(severity, "⚪")
+            alerts[f"{icon} {severity} — {alertname}"] = data
+        except Exception:
+            logging.warning("Не удалось загрузить алерт: %s", path)
+    return alerts
+
 
 NODE_LABELS = {
     "triage":         "Шаг 1 — Triage",
@@ -357,15 +366,13 @@ def main() -> None:
             if st.button("🔄 Сбросить", use_container_width=True):
                 _reset()
 
+        sample_alerts = _load_sample_alerts()
         preset = st.selectbox(
-            "Пресет", ["— кастомный —", *SAMPLE_ALERTS.keys()],
+            "Пресет", [_CUSTOM_LABEL, *sample_alerts.keys()],
             disabled=(stage not in ("idle",)),
         )
         default_json = json.dumps(
-            SAMPLE_ALERTS.get(preset, {
-                "id": "alert-000", "service": "my-service",
-                "message": "Something went wrong",
-            }),
+            sample_alerts.get(preset, _CUSTOM_DEFAULT),
             ensure_ascii=False, indent=2,
         )
         alert_json = st.text_area(
