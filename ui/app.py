@@ -187,7 +187,6 @@ def _stream_graph(
     ph_step1 = st.empty()
     ph_step2 = st.empty()
     ph_step3 = st.empty()
-    ph_approval = st.empty()
     ph_step4 = st.empty()
 
     # Ссылки на status-контейнеры второго шага (для fan-in)
@@ -215,6 +214,9 @@ def _stream_graph(
     try:
         for chunk in graph.stream(input_state, config, stream_mode="updates"):
             node_name = list(chunk.keys())[0]
+            # LangGraph эмитит __interrupt__ при остановке — пропускаем служебные чанки
+            if node_name.startswith("__"):
+                continue
             output: dict[str, Any] = chunk[node_name]
             completed[node_name] = output
 
@@ -285,12 +287,9 @@ def _stream_graph(
 
     if snapshot.next and "human_approval" in snapshot.next:
         st.session_state.stage = "awaiting_approval"
-        with ph_approval.container():
-            st.divider()
-            _render_approval_ui(thread_id, key_suffix="live")
     else:
         st.session_state.stage = "done"
-        st.rerun()
+    st.rerun()
 
 
 def _finalize_step2(ph_step2: Any, step2_status: Any, completed: dict, ph_step3: Any) -> None:
@@ -310,7 +309,7 @@ def _finalize_step2(ph_step2: Any, step2_status: Any, completed: dict, ph_step3:
     )
 
 
-def _render_approval_ui(thread_id: str, key_suffix: str = "") -> None:
+def _render_approval_ui(thread_id: str) -> None:
     """Форма подтверждения / отклонения плана реагирования."""
     config = {"configurable": {"thread_id": thread_id}}
     st.warning("### ⚠️ Human Approval Required")
@@ -320,18 +319,12 @@ def _render_approval_ui(thread_id: str, key_suffix: str = "") -> None:
     )
     col1, col2 = st.columns(2)
     with col1:
-        if st.button(
-            "✅ План корректен, фиксируем", type="primary",
-            use_container_width=True, key=f"approve_{key_suffix}",
-        ):
+        if st.button("✅ План корректен, фиксируем", type="primary", use_container_width=True):
             graph.update_state(config, {"human_approved": True})
             st.session_state.stage = "resuming"
             st.rerun()
     with col2:
-        if st.button(
-            "✏️ Есть замечания, скорректировать", type="secondary",
-            use_container_width=True, key=f"reject_{key_suffix}",
-        ):
+        if st.button("✏️ Есть замечания, скорректировать", type="secondary", use_container_width=True):
             st.session_state.stage = "awaiting_feedback"
             st.rerun()
 
@@ -433,7 +426,7 @@ def main() -> None:
     if stage == "awaiting_approval":
         _render_completed_steps(st.session_state.completed, stage="awaiting_approval")
         st.divider()
-        _render_approval_ui(st.session_state.thread_id, key_suffix="static")
+        _render_approval_ui(st.session_state.thread_id)
         st.stop()
 
     if stage == "awaiting_feedback":
@@ -466,7 +459,8 @@ def main() -> None:
         completed = st.session_state.completed
         metrics: dict[str, Any] = {}
         for output in completed.values():
-            metrics.update(output.get("metrics", {}))
+            if isinstance(output, dict):
+                metrics.update(output.get("metrics", {}))
         if metrics:
             st.divider()
             st.caption("**Latency per agent (s)**")
