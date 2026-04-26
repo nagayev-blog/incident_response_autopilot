@@ -1,160 +1,324 @@
 """Streamlit UI для Incident Response Autopilot.
 
-Флоу:
-  1. Пользователь заполняет форму алерта и нажимает «Run Analysis».
-  2. Граф выполняется до точки interrupt (или до END для LOW/HIGH).
-  3. Для CRITICAL — показывается панель Human Approval.
-  4. После апрува/отклонения — граф возобновляется, показывается постмортем.
+Стримингово-прогрессивный UI: каждый узел графа отображается по мере готовности.
+Использует graph.stream(stream_mode="updates") + st.status() для live-обновлений.
+
+Стадии сессии:
+  idle             — начальный экран
+  running          — граф стримится в реальном времени
+  awaiting_approval — ждём Approve/Reject (CRITICAL)
+  resuming         — продолжаем граф после апрува
+  done             — всё завершено
+  rejected         — отклонено инженером
 """
 
 import json
 import uuid
+from typing import Any
 
 import streamlit as st
 
 from src.graph.state import IncidentState
 from src.graph.workflow import graph
 
-# ── Константы ────────────────────────────────────────────────────────────────
+# ── Константы ─────────────────────────────────────────────────────────────────
 
-SEVERITY_COLORS = {
-    "CRITICAL": "🔴",
-    "HIGH": "🟠",
-    "LOW": "🟡",
-}
+SEV_ICON = {"CRITICAL": "🔴", "HIGH": "🟠", "LOW": "🟡"}
 
 SAMPLE_ALERTS = {
     "CRITICAL — DB down": {
         "id": "alert-001",
         "service": "payments-db",
-        "message": "DB connection pool exhausted, 0 connections available",
-        "_mock_severity": "CRITICAL",
-        "_mock_incident_type": "availability",
+        "message": "DB connection pool exhausted, 0 connections available, 500 errors/sec",
     },
     "HIGH — Latency spike": {
         "id": "alert-002",
-        "service": "api-gateway",
-        "message": "p99 latency 2400ms, threshold 500ms",
-        "_mock_severity": "HIGH",
-        "_mock_incident_type": "performance",
+        "service": "checkout-service",
+        "message": "Error rate 35%, p99 latency 8000ms, partial outage in EU region",
     },
     "LOW — Disk usage": {
         "id": "alert-003",
         "service": "storage-01",
         "message": "Disk usage at 78%, warning threshold",
-        "_mock_severity": "LOW",
-        "_mock_incident_type": "data",
     },
 }
 
-# ── Инициализация session_state ───────────────────────────────────────────────
+NODE_LABELS = {
+    "triage":         "Шаг 1 — Triage",
+    "diagnosis":      "Diagnosis",
+    "history":        "History",
+    "response":       "Шаг 3 — Response Plan",
+    "suggestion":     "Шаг 3 — Suggestion",
+    "postmortem":     "Шаг 4 — Postmortem",
+}
+
+# ── session_state ──────────────────────────────────────────────────────────────
 
 def _init_state() -> None:
-    defaults = {
+    defaults: dict[str, Any] = {
+        "stage": "idle",          # idle|running|awaiting_approval|resuming|done|rejected
         "thread_id": None,
-        "graph_state": None,
-        "stage": "idle",       # idle | running | awaiting_approval | done | rejected
+        "pending_alert": None,    # алерт ожидающий запуска
+        "completed": {},          # node_name → output dict
+        "final_state": {},        # итоговый state графа
         "error": None,
     }
-    for key, val in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = val
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
 
 
-# ── Вспомогательные рендер-функции ───────────────────────────────────────────
+def _reset() -> None:
+    for k in ["stage", "thread_id", "pending_alert", "completed", "final_state", "error"]:
+        st.session_state.pop(k, None)
+    st.rerun()
 
-def _render_triage(state: IncidentState) -> None:
-    severity = state.get("severity", "—")
-    inc_type = state.get("incident_type", "—")
-    icon = SEVERITY_COLORS.get(severity, "⚪")
-    st.markdown(f"**Severity:** {icon} `{severity}`  &nbsp;&nbsp; **Type:** `{inc_type}`")
+# ── Вспомогательные рендеры ────────────────────────────────────────────────────
+
+def _render_triage_content(output: dict[str, Any]) -> None:
+    sev = output.get("severity", "—")
+    typ = output.get("incident_type", "—")
+    icon = SEV_ICON.get(sev, "⚪")
+    m = output.get("metrics", {}).get("triage", {})
+    st.markdown(f"**Severity:** {icon} `{sev}`  &nbsp;&nbsp;  **Type:** `{typ}`")
+    if m:
+        st.caption(f"⏱ {m.get('latency_s', '?')}s · {m.get('input_tokens', '-')}/{m.get('output_tokens', '-')} tok")
 
 
-def _render_diagnosis(state: IncidentState) -> None:
-    diagnosis = state.get("diagnosis")
-    if diagnosis:
-        st.markdown(diagnosis)
-    else:
-        st.caption("_Diagnosis не запускался (LOW-ветка)_")
+def _render_diagnosis_content(output: dict[str, Any]) -> None:
+    st.markdown(output.get("diagnosis", ""))
+    m = output.get("metrics", {}).get("diagnosis", {})
+    if m:
+        st.caption(f"⏱ {m.get('latency_s', '?')}s · {m.get('input_tokens', '-')}/{m.get('output_tokens', '-')} tok")
 
 
-def _render_history(state: IncidentState) -> None:
-    incidents = state.get("similar_incidents", [])
+def _render_history_content(output: dict[str, Any]) -> None:
+    incidents = output.get("similar_incidents", [])
     if not incidents:
-        st.caption("_Похожих инцидентов не найдено_")
-        return
+        st.caption("Похожих инцидентов не найдено")
     for inc in incidents:
-        score = inc.get("score", 0)
         st.markdown(
             f"**{inc.get('id', '?')}** — {inc.get('title', '')}"
-            f"  \n_Score: {score:.2f}_ | {inc.get('resolution', '')}"
+            f"  \n_Score: {inc.get('score', 0):.2f}_ · {inc.get('resolution', '')}"
         )
+    m = output.get("metrics", {}).get("history", {})
+    if m and m.get("latency_s"):
+        st.caption(f"⏱ {m.get('latency_s')}s")
 
 
-def _render_response_plan(state: IncidentState) -> None:
-    plan = state.get("response_plan", "")
-    if plan:
-        st.markdown(plan)
+def _render_response_content(output: dict[str, Any]) -> None:
+    st.markdown(output.get("response_plan", ""))
+    m = output.get("metrics", {}).get("response", {})
+    if m:
+        st.caption(f"⏱ {m.get('latency_s', '?')}s · {m.get('input_tokens', '-')}/{m.get('output_tokens', '-')} tok")
 
 
-def _render_postmortem(state: IncidentState) -> None:
-    pm = state.get("postmortem", "")
-    if pm:
-        st.code(pm, language="markdown")
+def _render_postmortem_content(output: dict[str, Any]) -> None:
+    st.code(output.get("postmortem", ""), language="markdown")
+    m = output.get("metrics", {}).get("postmortem", {})
+    if m:
+        st.caption(f"⏱ {m.get('latency_s', '?')}s · {m.get('input_tokens', '-')}/{m.get('output_tokens', '-')} tok")
 
 
-def _render_metrics(state: IncidentState) -> None:
-    metrics = state.get("metrics", {})
-    if not metrics:
-        return
-    cols = st.columns(len(metrics))
-    for col, (agent, data) in zip(cols, metrics.items()):
-        latency = data.get("latency_s", "—") if isinstance(data, dict) else "—"
-        col.metric(label=agent, value=f"{latency}s")
+def _render_suggestion_content(output: dict[str, Any]) -> None:
+    st.markdown(output.get("response_plan", ""))
+    m = output.get("metrics", {}).get("suggestion", {})
+    if m:
+        st.caption(f"⏱ {m.get('latency_s', '?')}s · {m.get('input_tokens', '-')}/{m.get('output_tokens', '-')} tok")
 
 
-# ── Логика запуска графа ──────────────────────────────────────────────────────
+# ── Статические результаты (для stage != running) ──────────────────────────────
 
-def _run_graph(alert: dict) -> None:
-    thread_id = str(uuid.uuid4())
+def _render_completed_steps(completed: dict[str, Any], stage: str) -> None:
+    """Рендерит уже завершённые шаги как закрытые expander-ы."""
+
+    if "triage" in completed:
+        sev = completed["triage"].get("severity", "?")
+        icon = SEV_ICON.get(sev, "⚪")
+        with st.expander(f"✅ Шаг 1 — Triage: {icon} {sev}", expanded=False):
+            _render_triage_content(completed["triage"])
+
+    severity = completed.get("triage", {}).get("severity", "")
+
+    if severity in ("CRITICAL", "HIGH") and ("diagnosis" in completed or "history" in completed):
+        with st.expander("✅ Шаг 2 — Diagnosis + History (параллельно)", expanded=False):
+            c1, c2 = st.columns(2)
+            with c1:
+                st.subheader("Diagnosis")
+                if "diagnosis" in completed:
+                    _render_diagnosis_content(completed["diagnosis"])
+            with c2:
+                st.subheader("History")
+                if "history" in completed:
+                    _render_history_content(completed["history"])
+
+    elif severity == "LOW" and "history" in completed:
+        with st.expander("✅ Шаг 2 — History", expanded=False):
+            _render_history_content(completed["history"])
+
+    if "response" in completed:
+        with st.expander("✅ Шаг 3 — Response Plan", expanded=False):
+            _render_response_content(completed["response"])
+
+    if "suggestion" in completed:
+        with st.expander("✅ Шаг 3 — Suggestion", expanded=False):
+            _render_suggestion_content(completed["suggestion"])
+
+    if stage == "done" and "postmortem" in completed:
+        with st.expander("✅ Шаг 4 — Postmortem", expanded=True):
+            _render_postmortem_content(completed["postmortem"])
+
+
+# ── Стриминговый запуск графа ──────────────────────────────────────────────────
+
+def _stream_graph(alert: dict[str, Any], thread_id: str, resume: bool = False) -> None:
+    """Запускает или возобновляет граф и обновляет UI в реальном времени."""
     config = {"configurable": {"thread_id": thread_id}}
-    initial_state = IncidentState(alert=alert)
+    completed: dict[str, Any] = dict(st.session_state.completed)
 
-    with st.spinner("Запускаю анализ инцидента…"):
-        try:
-            result = graph.invoke(initial_state, config)
-        except Exception as exc:
-            st.session_state.error = str(exc)
-            st.session_state.stage = "idle"
-            return
+    # ── Плейсхолдеры для live-обновлений ──────────────────────────────────────
+    ph_step1 = st.empty()
+    ph_step2 = st.empty()
+    ph_step3 = st.empty()
+    ph_approval = st.empty()
+    ph_step4 = st.empty()
 
-    st.session_state.thread_id = thread_id
-    st.session_state.graph_state = result
+    # Ссылки на status-контейнеры второго шага (для fan-in)
+    step2_status: Any = None
+    step2_diag_ph: Any = None
+    step2_hist_ph: Any = None
+    step2_done: set[str] = set()
 
-    # Проверяем — граф остановился на interrupt или завершился
+    if resume:
+        # Показываем уже завершённые шаги компактно
+        _render_completed_steps(completed, stage="resuming")
+        ph_step4.status("⏳ Шаг 4 — Postmortem", state="running", expanded=True).write(
+            "Формирую финальный постмортем..."
+        )
+    else:
+        # Первый запуск: показываем шаг 1 как запущенный
+        s1 = ph_step1.status("⏳ Шаг 1 — Triage", state="running", expanded=True)
+        s1.write("Анализирую алерт, определяю severity...")
+
+    # ── Стрим ─────────────────────────────────────────────────────────────────
+    input_state = None if resume else IncidentState(alert=alert)
+    try:
+        for chunk in graph.stream(input_state, config, stream_mode="updates"):
+            node_name = list(chunk.keys())[0]
+            output: dict[str, Any] = chunk[node_name]
+            completed[node_name] = output
+
+            if node_name == "triage":
+                sev = output.get("severity", "?")
+                icon = SEV_ICON.get(sev, "⚪")
+                s1 = ph_step1.status(
+                    f"✅ Шаг 1 — Triage: {icon} {sev}",
+                    state="complete", expanded=False,
+                )
+                with ph_step1.status(f"✅ Шаг 1 — Triage: {icon} {sev}", state="complete", expanded=False):
+                    _render_triage_content(output)
+
+                if sev in ("CRITICAL", "HIGH"):
+                    step2_status = ph_step2.status(
+                        "⏳ Шаг 2 — Diagnosis + History (параллельно ↕)",
+                        state="running", expanded=True,
+                    )
+                    step2_status.write("🔀 Запущено параллельно:")
+                    step2_diag_ph = step2_status.empty()
+                    step2_hist_ph = step2_status.empty()
+                    step2_diag_ph.write("⏳ **Diagnosis** — запрос к LLM...")
+                    step2_hist_ph.write("⏳ **History** — поиск похожих инцидентов...")
+                else:
+                    ph_step2.status(
+                        "⏳ Шаг 2 — History", state="running", expanded=True,
+                    ).write("Ищу похожие инциденты...")
+
+            elif node_name == "diagnosis":
+                step2_done.add("diagnosis")
+                if step2_diag_ph:
+                    step2_diag_ph.write("✅ **Diagnosis** готов")
+                if step2_hist_ph and "history" in step2_done:
+                    _finalize_step2(ph_step2, step2_status, completed, ph_step3)
+
+            elif node_name == "history":
+                step2_done.add("history")
+                severity = completed.get("triage", {}).get("severity", "")
+                if severity in ("CRITICAL", "HIGH"):
+                    if step2_hist_ph:
+                        n = len(output.get("similar_incidents", []))
+                        step2_hist_ph.write(f"✅ **History** — найдено {n} похожих инцидентов")
+                    if "diagnosis" in step2_done:
+                        _finalize_step2(ph_step2, step2_status, completed, ph_step3)
+                else:
+                    with ph_step2.status("✅ Шаг 2 — History", state="complete", expanded=False):
+                        _render_history_content(output)
+                    ph_step3.status("⏳ Шаг 3 — Suggestion", state="running", expanded=True).write(
+                        "Формирую рекомендации..."
+                    )
+
+            elif node_name == "response":
+                with ph_step3.status("✅ Шаг 3 — Response Plan", state="complete", expanded=False):
+                    _render_response_content(output)
+
+            elif node_name == "suggestion":
+                with ph_step3.status("✅ Шаг 3 — Suggestion", state="complete", expanded=False):
+                    _render_suggestion_content(output)
+
+            elif node_name == "postmortem":
+                with ph_step4.status("✅ Шаг 4 — Postmortem", state="complete", expanded=True):
+                    _render_postmortem_content(output)
+
+    except Exception as exc:
+        st.session_state.error = str(exc)
+        st.session_state.stage = "idle"
+        return
+
+    # ── После стрима: определяем следующую стадию ──────────────────────────────
+    st.session_state.completed = completed
     snapshot = graph.get_state(config)
+
     if snapshot.next and "human_approval" in snapshot.next:
         st.session_state.stage = "awaiting_approval"
+        with ph_approval.container():
+            st.divider()
+            st.warning("### ⚠️ Human Approval Required")
+            st.markdown(
+                "Инцидент **CRITICAL**. Подтвердите или отклоните план "
+                "реагирования перед запуском постмортема."
+            )
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ Approve", type="primary", use_container_width=True, key="approve_live"):
+                    graph.update_state(config, {"human_approved": True})
+                    st.session_state.stage = "resuming"
+                    st.rerun()
+            with col2:
+                if st.button("❌ Reject", type="secondary", use_container_width=True, key="reject_live"):
+                    st.session_state.stage = "rejected"
+                    st.rerun()
     else:
         st.session_state.stage = "done"
+        st.rerun()
 
 
-def _resume_graph(approved: bool) -> None:
-    config = {"configurable": {"thread_id": st.session_state.thread_id}}
+def _finalize_step2(ph_step2: Any, step2_status: Any, completed: dict, ph_step3: Any) -> None:
+    """Закрывает шаг 2 и открывает шаг 3 когда оба параллельных узла готовы."""
+    with ph_step2.status("✅ Шаг 2 — Diagnosis + History", state="complete", expanded=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            st.subheader("Diagnosis")
+            if "diagnosis" in completed:
+                _render_diagnosis_content(completed["diagnosis"])
+        with c2:
+            st.subheader("History")
+            if "history" in completed:
+                _render_history_content(completed["history"])
+    ph_step3.status("⏳ Шаг 3 — Response Plan", state="running", expanded=True).write(
+        "Агрегирую диагноз и историю, формирую план..."
+    )
 
-    with st.spinner("Возобновляю граф…"):
-        try:
-            graph.update_state(config, {"human_approved": approved})
-            result = graph.invoke(None, config)
-        except Exception as exc:
-            st.session_state.error = str(exc)
-            return
 
-    st.session_state.graph_state = result
-    st.session_state.stage = "done" if approved else "rejected"
-
-
-# ── Главный UI ────────────────────────────────────────────────────────────────
+# ── Главный UI ─────────────────────────────────────────────────────────────────
 
 def main() -> None:
     _init_state()
@@ -165,115 +329,119 @@ def main() -> None:
         layout="wide",
     )
     st.title("🚨 Incident Response Autopilot")
-    st.caption("MAS-система автоматической диагностики инцидентов · Mock-режим")
 
-    # ── Боковая панель: ввод алерта ──────────────────────────────────────────
+    stage = st.session_state.stage
+
+    # ── Боковая панель ─────────────────────────────────────────────────────────
     with st.sidebar:
         st.header("Alert Input")
 
-        preset = st.selectbox("Пресет алерта", ["— кастомный —", *SAMPLE_ALERTS.keys()])
+        if stage != "idle":
+            if st.button("🔄 Сбросить", use_container_width=True):
+                _reset()
 
-        if preset != "— кастомный —":
-            default_json = json.dumps(SAMPLE_ALERTS[preset], ensure_ascii=False, indent=2)
-        else:
-            default_json = json.dumps(
-                {"id": "alert-000", "service": "my-service", "message": "Something went wrong",
-                 "_mock_severity": "HIGH", "_mock_incident_type": "performance"},
-                ensure_ascii=False, indent=2,
-            )
+        preset = st.selectbox(
+            "Пресет", ["— кастомный —", *SAMPLE_ALERTS.keys()],
+            disabled=(stage not in ("idle",)),
+        )
+        default_json = json.dumps(
+            SAMPLE_ALERTS.get(preset, {
+                "id": "alert-000", "service": "my-service",
+                "message": "Something went wrong",
+            }),
+            ensure_ascii=False, indent=2,
+        )
+        alert_json = st.text_area(
+            "Alert JSON", value=default_json, height=220,
+            disabled=(stage not in ("idle",)),
+        )
 
-        alert_json = st.text_area("Alert JSON", value=default_json, height=220)
-
-        run_clicked = st.button("▶ Run Analysis", type="primary", use_container_width=True)
-
+        run_clicked = st.button(
+            "▶ Run Analysis", type="primary",
+            use_container_width=True,
+            disabled=(stage not in ("idle",)),
+        )
         if run_clicked:
-            # Сбрасываем предыдущий прогон
-            st.session_state.graph_state = None
-            st.session_state.stage = "idle"
-            st.session_state.error = None
-
             try:
                 alert = json.loads(alert_json)
             except json.JSONDecodeError as exc:
                 st.error(f"Невалидный JSON: {exc}")
                 st.stop()
-
-            _run_graph(alert)
+            st.session_state.pending_alert = alert
+            st.session_state.thread_id = str(uuid.uuid4())
+            st.session_state.completed = {}
+            st.session_state.stage = "running"
             st.rerun()
 
-        if st.session_state.stage != "idle":
-            st.divider()
-            if st.button("🔄 Сбросить", use_container_width=True):
-                for key in ["thread_id", "graph_state", "stage", "error"]:
-                    st.session_state[key] = None if key != "stage" else "idle"
-                st.rerun()
-
-    # ── Основная панель: результаты ──────────────────────────────────────────
+    # ── Основная панель ────────────────────────────────────────────────────────
     if st.session_state.error:
         st.error(f"Ошибка: {st.session_state.error}")
+        if st.button("Сбросить"):
+            _reset()
         st.stop()
 
-    if st.session_state.stage == "idle":
+    if stage == "idle":
         st.info("Выберите алерт в боковой панели и нажмите **▶ Run Analysis**.")
         st.stop()
 
-    state: IncidentState = st.session_state.graph_state or {}
+    if stage == "running":
+        st.caption("⚙️ Граф запущен — обновления в реальном времени")
+        _stream_graph(
+            alert=st.session_state.pending_alert,
+            thread_id=st.session_state.thread_id,
+            resume=False,
+        )
+        st.stop()
 
-    # ── Шаг 1: Triage ────────────────────────────────────────────────────────
-    with st.expander("**Шаг 1 — Triage** ✅", expanded=True):
-        _render_triage(state)
+    if stage == "resuming":
+        st.caption("⚙️ Возобновляю граф после апрува...")
+        _stream_graph(
+            alert=st.session_state.pending_alert,
+            thread_id=st.session_state.thread_id,
+            resume=True,
+        )
+        st.stop()
 
-    # ── Шаг 2: Diagnosis + History ───────────────────────────────────────────
-    severity = state.get("severity", "")
-    if severity in ("CRITICAL", "HIGH"):
-        with st.expander("**Шаг 2 — Diagnosis + History** ✅ _(параллельно)_", expanded=True):
-            col_diag, col_hist = st.columns(2)
-            with col_diag:
-                st.subheader("Diagnosis")
-                _render_diagnosis(state)
-            with col_hist:
-                st.subheader("Similar Incidents")
-                _render_history(state)
-    else:
-        with st.expander("**Шаг 2 — History** ✅", expanded=True):
-            _render_history(state)
-
-    # ── Шаг 3: Response / Suggestion ─────────────────────────────────────────
-    label = "Response Plan" if severity in ("CRITICAL", "HIGH") else "Suggestion"
-    with st.expander(f"**Шаг 3 — {label}** ✅", expanded=True):
-        _render_response_plan(state)
-
-    # ── Human Approval (только CRITICAL) ─────────────────────────────────────
-    if st.session_state.stage == "awaiting_approval":
+    if stage == "awaiting_approval":
+        _render_completed_steps(st.session_state.completed, stage="awaiting_approval")
         st.divider()
         st.warning("### ⚠️ Human Approval Required")
         st.markdown(
-            "Инцидент классифицирован как **CRITICAL**. "
-            "Подтвердите или отклоните план реагирования перед запуском постмортема."
+            "Инцидент **CRITICAL**. Подтвердите или отклоните план "
+            "реагирования перед запуском постмортема."
         )
-        col_approve, col_reject = st.columns(2)
-        with col_approve:
+        col1, col2 = st.columns(2)
+        with col1:
             if st.button("✅ Approve", type="primary", use_container_width=True):
-                _resume_graph(approved=True)
+                config = {"configurable": {"thread_id": st.session_state.thread_id}}
+                graph.update_state(config, {"human_approved": True})
+                st.session_state.stage = "resuming"
                 st.rerun()
-        with col_reject:
+        with col2:
             if st.button("❌ Reject", type="secondary", use_container_width=True):
-                _resume_graph(approved=False)
+                st.session_state.stage = "rejected"
                 st.rerun()
+        st.stop()
 
-    # ── Шаг 4: Postmortem ────────────────────────────────────────────────────
-    if st.session_state.stage == "done" and state.get("postmortem"):
-        with st.expander("**Шаг 4 — Postmortem** ✅", expanded=True):
-            _render_postmortem(state)
+    if stage == "done":
+        _render_completed_steps(st.session_state.completed, stage="done")
+        completed = st.session_state.completed
+        metrics: dict[str, Any] = {}
+        for output in completed.values():
+            metrics.update(output.get("metrics", {}))
+        if metrics:
+            st.divider()
+            st.caption("**Latency per agent (s)**")
+            cols = st.columns(len(metrics))
+            for col, (agent, m) in zip(cols, metrics.items()):
+                if isinstance(m, dict):
+                    col.metric(agent, f"{m.get('latency_s', '?')}s")
+        st.stop()
 
-    if st.session_state.stage == "rejected":
+    if stage == "rejected":
+        _render_completed_steps(st.session_state.completed, stage="rejected")
         st.error("Инцидент отклонён инженером. Постмортем не создан.")
-
-    # ── Метрики ───────────────────────────────────────────────────────────────
-    if state.get("metrics"):
-        st.divider()
-        st.caption("**Latency per agent (s)**")
-        _render_metrics(state)
+        st.stop()
 
 
 if __name__ == "__main__":
