@@ -11,10 +11,11 @@ class Settings(BaseSettings):
 
     # Anthropic
     anthropic_api_key: str = ""
+    anthropic_model: str = "claude-haiku-4-5"  # legacy, оставлен для совместимости с .env
     triage_model: str = "claude-haiku-4-5"
     agent_model: str = "claude-haiku-4-5"
-    triage_temperature: float = 1.0
-    agent_temperature: float = 1.0
+    triage_temperature: float = 0.3
+    agent_temperature: float = 0.4
     max_tokens: int = 2048
 
     # LangSmith
