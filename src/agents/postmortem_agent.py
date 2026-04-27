@@ -4,7 +4,6 @@ from typing import Any
 
 import anthropic
 from langsmith import traceable
-from langsmith.wrappers import wrap_anthropic
 
 from src.agents.postmortem_prompts import SYSTEM_PROMPT, build_user_prompt
 from src.agents.postmortem_schema import PostmortemOutput
@@ -13,7 +12,23 @@ from src.graph.state import IncidentState
 
 logger = logging.getLogger(__name__)
 
-_client = wrap_anthropic(anthropic.Anthropic(api_key=settings.anthropic_api_key or None))
+_client = anthropic.Anthropic(api_key=settings.anthropic_api_key or None)
+
+
+@traceable(run_type="llm", name=f"anthropic/{settings.triage_model}")
+def _llm(system: str, user: str) -> dict[str, Any]:
+    response = _client.messages.parse(
+        model=settings.triage_model,
+        max_tokens=2048,
+        system=system,
+        messages=[{"role": "user", "content": user}],
+        output_format=PostmortemOutput,
+    )
+    return {
+        **response.parsed_output.model_dump(),
+        "_input_tokens": response.usage.input_tokens,
+        "_output_tokens": response.usage.output_tokens,
+    }
 
 
 @traceable(name="PostmortemAgent")
@@ -23,25 +38,19 @@ def postmortem_node(state: IncidentState) -> dict[str, Any]:
 
     logger.info("postmortem_node: human_approved=%s", state.get("human_approved"))
 
-    response = _client.messages.parse(
-        model=settings.triage_model,
-        max_tokens=2048,
-        system=SYSTEM_PROMPT,
-        messages=[{
-            "role": "user",
-            "content": build_user_prompt(
-                alert=state["alert"],
-                severity=state.get("severity", "HIGH"),
-                diagnosis=state.get("diagnosis", ""),
-                response_plan=state.get("response_plan", ""),
-                similar_incidents=state.get("similar_incidents", []),
-                human_approved=state.get("human_approved", False),
-            ),
-        }],
-        output_format=PostmortemOutput,
+    user_prompt = build_user_prompt(
+        alert=state["alert"],
+        severity=state.get("severity", "HIGH"),
+        diagnosis=state.get("diagnosis", ""),
+        response_plan=state.get("response_plan", ""),
+        similar_incidents=state.get("similar_incidents", []),
+        human_approved=state.get("human_approved", False),
     )
 
-    result: PostmortemOutput = response.parsed_output
+    raw = _llm(SYSTEM_PROMPT, user_prompt)
+    input_tokens = raw.pop("_input_tokens")
+    output_tokens = raw.pop("_output_tokens")
+    result = PostmortemOutput(**raw)
     latency = time.monotonic() - start
 
     postmortem = (
@@ -60,8 +69,8 @@ def postmortem_node(state: IncidentState) -> dict[str, Any]:
         "metrics": {
             "postmortem": {
                 "latency_s": round(latency, 3),
-                "input_tokens": response.usage.input_tokens,
-                "output_tokens": response.usage.output_tokens,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
             }
         },
     }

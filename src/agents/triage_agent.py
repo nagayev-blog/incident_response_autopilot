@@ -4,7 +4,6 @@ from typing import Any
 
 import anthropic
 from langsmith import traceable
-from langsmith.wrappers import wrap_anthropic
 
 from src.agents.triage_prompts import SYSTEM_PROMPT, build_user_prompt
 from src.agents.triage_schema import TriageOutput
@@ -13,7 +12,23 @@ from src.graph.state import IncidentState
 
 logger = logging.getLogger(__name__)
 
-_client = wrap_anthropic(anthropic.Anthropic(api_key=settings.anthropic_api_key or None))
+_client = anthropic.Anthropic(api_key=settings.anthropic_api_key or None)
+
+
+@traceable(run_type="llm", name=f"anthropic/{settings.triage_model}")
+def _llm(system: str, user: str) -> dict[str, Any]:
+    response = _client.messages.parse(
+        model=settings.triage_model,
+        max_tokens=256,
+        system=system,
+        messages=[{"role": "user", "content": user}],
+        output_format=TriageOutput,
+    )
+    return {
+        **response.parsed_output.model_dump(),
+        "_input_tokens": response.usage.input_tokens,
+        "_output_tokens": response.usage.output_tokens,
+    }
 
 
 @traceable(name="TriageAgent")
@@ -24,21 +39,13 @@ def triage_node(state: IncidentState) -> dict[str, Any]:
 
     logger.info("triage_node: processing alert %s", alert.get("id", "unknown"))
 
-    response = _client.messages.parse(
-        model=settings.triage_model,
-        max_tokens=256,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": build_user_prompt(alert)}],
-        output_format=TriageOutput,
-    )
-
-    result: TriageOutput = response.parsed_output
+    raw = _llm(SYSTEM_PROMPT, build_user_prompt(alert))
+    input_tokens = raw.pop("_input_tokens")
+    output_tokens = raw.pop("_output_tokens")
+    result = TriageOutput(**raw)
     latency = time.monotonic() - start
 
-    logger.info(
-        "triage_node: severity=%s type=%s (%.2fs)",
-        result.severity, result.incident_type, latency,
-    )
+    logger.info("triage_node: severity=%s type=%s (%.2fs)", result.severity, result.incident_type, latency)
 
     return {
         "severity": result.severity,
@@ -46,8 +53,8 @@ def triage_node(state: IncidentState) -> dict[str, Any]:
         "metrics": {
             "triage": {
                 "latency_s": round(latency, 3),
-                "input_tokens": response.usage.input_tokens,
-                "output_tokens": response.usage.output_tokens,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
             }
         },
     }

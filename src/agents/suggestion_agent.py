@@ -4,7 +4,6 @@ from typing import Any
 
 import anthropic
 from langsmith import traceable
-from langsmith.wrappers import wrap_anthropic
 
 from src.agents.suggestion_prompts import SYSTEM_PROMPT, build_user_prompt
 from src.agents.suggestion_schema import SuggestionOutput
@@ -13,7 +12,23 @@ from src.graph.state import IncidentState
 
 logger = logging.getLogger(__name__)
 
-_client = wrap_anthropic(anthropic.Anthropic(api_key=settings.anthropic_api_key or None))
+_client = anthropic.Anthropic(api_key=settings.anthropic_api_key or None)
+
+
+@traceable(run_type="llm", name=f"anthropic/{settings.triage_model}")
+def _llm(system: str, user: str) -> dict[str, Any]:
+    response = _client.messages.parse(
+        model=settings.triage_model,
+        max_tokens=512,
+        system=system,
+        messages=[{"role": "user", "content": user}],
+        output_format=SuggestionOutput,
+    )
+    return {
+        **response.parsed_output.model_dump(),
+        "_input_tokens": response.usage.input_tokens,
+        "_output_tokens": response.usage.output_tokens,
+    }
 
 
 @traceable(name="SuggestionAgent")
@@ -23,21 +38,15 @@ def suggestion_node(state: IncidentState) -> dict[str, Any]:
 
     logger.info("suggestion_node: LOW incident, service=%s", state.get("alert", {}).get("service"))
 
-    response = _client.messages.parse(
-        model=settings.triage_model,
-        max_tokens=512,
-        system=SYSTEM_PROMPT,
-        messages=[{
-            "role": "user",
-            "content": build_user_prompt(
-                alert=state["alert"],
-                similar_incidents=state.get("similar_incidents", []),
-            ),
-        }],
-        output_format=SuggestionOutput,
+    user_prompt = build_user_prompt(
+        alert=state["alert"],
+        similar_incidents=state.get("similar_incidents", []),
     )
 
-    result: SuggestionOutput = response.parsed_output
+    raw = _llm(SYSTEM_PROMPT, user_prompt)
+    input_tokens = raw.pop("_input_tokens")
+    output_tokens = raw.pop("_output_tokens")
+    result = SuggestionOutput(**raw)
     latency = time.monotonic() - start
 
     response_plan = (
@@ -53,8 +62,8 @@ def suggestion_node(state: IncidentState) -> dict[str, Any]:
         "metrics": {
             "suggestion": {
                 "latency_s": round(latency, 3),
-                "input_tokens": response.usage.input_tokens,
-                "output_tokens": response.usage.output_tokens,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
             }
         },
     }

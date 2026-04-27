@@ -4,7 +4,6 @@ from typing import Any
 
 import anthropic
 from langsmith import traceable
-from langsmith.wrappers import wrap_anthropic
 
 from src.agents.diagnosis_prompts import SYSTEM_PROMPT, build_user_prompt
 from src.agents.diagnosis_schema import DiagnosisOutput
@@ -13,7 +12,23 @@ from src.graph.state import IncidentState
 
 logger = logging.getLogger(__name__)
 
-_client = wrap_anthropic(anthropic.Anthropic(api_key=settings.anthropic_api_key or None))
+_client = anthropic.Anthropic(api_key=settings.anthropic_api_key or None)
+
+
+@traceable(run_type="llm", name=f"anthropic/{settings.agent_model}")
+def _llm(system: str, user: str) -> dict[str, Any]:
+    response = _client.messages.parse(
+        model=settings.agent_model,
+        max_tokens=1024,
+        system=system,
+        messages=[{"role": "user", "content": user}],
+        output_format=DiagnosisOutput,
+    )
+    return {
+        **response.parsed_output.model_dump(),
+        "_input_tokens": response.usage.input_tokens,
+        "_output_tokens": response.usage.output_tokens,
+    }
 
 
 @traceable(name="DiagnosisAgent")
@@ -26,15 +41,10 @@ def diagnosis_node(state: IncidentState) -> dict[str, Any]:
 
     logger.info("diagnosis_node: severity=%s type=%s", severity, incident_type)
 
-    response = _client.messages.parse(
-        model=settings.agent_model,
-        max_tokens=1024,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": build_user_prompt(alert, severity, incident_type)}],
-        output_format=DiagnosisOutput,
-    )
-
-    result: DiagnosisOutput = response.parsed_output
+    raw = _llm(SYSTEM_PROMPT, build_user_prompt(alert, severity, incident_type))
+    input_tokens = raw.pop("_input_tokens")
+    output_tokens = raw.pop("_output_tokens")
+    result = DiagnosisOutput(**raw)
     latency = time.monotonic() - start
 
     diagnosis = (
@@ -51,8 +61,8 @@ def diagnosis_node(state: IncidentState) -> dict[str, Any]:
         "metrics": {
             "diagnosis": {
                 "latency_s": round(latency, 3),
-                "input_tokens": response.usage.input_tokens,
-                "output_tokens": response.usage.output_tokens,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
             }
         },
     }
