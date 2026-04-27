@@ -4,6 +4,7 @@ from typing import Any
 
 import anthropic
 from langsmith import traceable
+from langsmith.wrappers import wrap_anthropic
 
 from src.agents.triage_prompts import SYSTEM_PROMPT, build_user_prompt
 from src.agents.triage_schema import TriageOutput
@@ -12,7 +13,7 @@ from src.graph.state import IncidentState
 
 logger = logging.getLogger(__name__)
 
-_client = anthropic.Anthropic(api_key=settings.anthropic_api_key or None)
+_client = wrap_anthropic(anthropic.Anthropic(api_key=settings.anthropic_api_key or None))
 
 
 @traceable(name="TriageAgent")
