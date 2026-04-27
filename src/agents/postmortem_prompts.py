@@ -13,9 +13,8 @@ Guidelines:
 - resolution: what was done to restore service.
 - action_items: specific, assignable tasks with owner role (e.g. "DBA: add connection pool monitoring alert").
 - Keep each field brief. Each list item must be under 25 words.
-- Answer in Russian.
+- ВАЖНО: Весь ответ строго на русском языке. Даже если входные данные на английском — отвечай только по-русски.
 """
-
 
 def build_user_prompt(
     alert: dict[str, Any],
