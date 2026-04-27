@@ -16,10 +16,10 @@ _client = anthropic.Anthropic(api_key=settings.anthropic_api_key or None)
 
 
 @traceable(run_type="llm", name=f"anthropic/{settings.triage_model}")
-def _llm(system: str, user: str) -> dict[str, Any]:
+def _llm(system: str, user: str, model: str = settings.triage_model, max_tokens: int = 2048, temperature: float = 1.0) -> dict[str, Any]:
     response = _client.messages.parse(
-        model=settings.triage_model,
-        max_tokens=2048,
+        model=model,
+        max_tokens=max_tokens,
         system=system,
         messages=[{"role": "user", "content": user}],
         output_format=PostmortemOutput,

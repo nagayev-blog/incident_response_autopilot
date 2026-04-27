@@ -16,10 +16,10 @@ _client = anthropic.Anthropic(api_key=settings.anthropic_api_key or None)
 
 
 @traceable(run_type="llm", name=f"anthropic/{settings.agent_model}")
-def _llm(system: str, user: str) -> dict[str, Any]:
+def _llm(system: str, user: str, model: str = settings.agent_model, max_tokens: int = 1024, temperature: float = 1.0) -> dict[str, Any]:
     response = _client.messages.parse(
-        model=settings.agent_model,
-        max_tokens=1024,
+        model=model,
+        max_tokens=max_tokens,
         system=system,
         messages=[{"role": "user", "content": user}],
         output_format=DiagnosisOutput,
