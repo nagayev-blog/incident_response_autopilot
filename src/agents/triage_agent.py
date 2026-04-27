@@ -3,6 +3,7 @@ import time
 from typing import Any
 
 import anthropic
+from langsmith import traceable
 
 from src.agents.triage_prompts import SYSTEM_PROMPT, build_user_prompt
 from src.agents.triage_schema import TriageOutput
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 _client = anthropic.Anthropic(api_key=settings.anthropic_api_key or None)
 
 
+@traceable(name="TriageAgent")
 def triage_node(state: IncidentState) -> dict[str, Any]:
     """Классифицирует severity и тип инцидента через Claude structured output."""
     start = time.monotonic()

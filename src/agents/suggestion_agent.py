@@ -3,6 +3,7 @@ import time
 from typing import Any
 
 import anthropic
+from langsmith import traceable
 
 from src.agents.suggestion_prompts import SYSTEM_PROMPT, build_user_prompt
 from src.agents.suggestion_schema import SuggestionOutput
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 _client = anthropic.Anthropic(api_key=settings.anthropic_api_key or None)
 
 
+@traceable(name="SuggestionAgent")
 def suggestion_node(state: IncidentState) -> dict[str, Any]:
     """Формирует рекомендации для LOW-инцидентов."""
     start = time.monotonic()
