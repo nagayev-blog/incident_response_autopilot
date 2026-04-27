@@ -26,6 +26,7 @@ import streamlit as st
 
 from src.graph.state import IncidentState
 from src.graph.workflow import graph
+from src.monitoring.metrics import append_record, build_record
 
 # ── Константы ─────────────────────────────────────────────────────────────────
 
@@ -73,6 +74,8 @@ def _init_state() -> None:
         "completed": {},
         "final_state": {},
         "error": None,
+        "had_feedback": False,      # True если инженер отправлял фидбек (для success rate)
+        "metrics_recorded": False,  # идемпотентность: запись только один раз
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -80,7 +83,8 @@ def _init_state() -> None:
 
 
 def _reset() -> None:
-    for k in ["stage", "thread_id", "pending_alert", "completed", "final_state", "error"]:
+    for k in ["stage", "thread_id", "pending_alert", "completed", "final_state", "error",
+               "had_feedback", "metrics_recorded"]:
         st.session_state.pop(k, None)
     st.rerun()
 
@@ -351,6 +355,7 @@ def _render_approval_ui(thread_id: str) -> None:
             st.rerun()
     with col2:
         if st.button("✏️ Есть замечания, скорректировать", type="secondary", use_container_width=True):
+            st.session_state.had_feedback = True
             st.session_state.stage = "awaiting_feedback"
             st.rerun()
 
@@ -481,15 +486,39 @@ def main() -> None:
     if stage == "done":
         _render_completed_steps(st.session_state.completed, stage="done")
         completed = st.session_state.completed
-        metrics: dict[str, Any] = {}
+
+        # Агрегируем метрики из всех узлов
+        raw_metrics: dict[str, Any] = {}
         for output in completed.values():
             if isinstance(output, dict):
-                metrics.update(output.get("metrics", {}))
-        if metrics:
+                raw_metrics.update(output.get("metrics", {}))
+
+        # ── Запись в metrics.jsonl (один раз за инцидент) ──────────────────────
+        if not st.session_state.get("metrics_recorded") and st.session_state.thread_id:
+            triage_out = completed.get("triage", {})
+            severity = triage_out.get("severity", "UNKNOWN")
+            incident_type = triage_out.get("incident_type", "unknown")
+            # Одобрено без правок = есть postmortem + инженер не отправлял фидбек
+            approved_clean = "postmortem" in completed and not st.session_state.get("had_feedback", False)
+            try:
+                record = build_record(
+                    incident_id=st.session_state.thread_id,
+                    severity=severity,
+                    incident_type=incident_type,
+                    approved_without_changes=approved_clean,
+                    raw_metrics=raw_metrics,
+                )
+                append_record(record)
+                st.session_state.metrics_recorded = True
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Не удалось записать метрики: %s", exc)
+
+        # ── Сводка latency ─────────────────────────────────────────────────────
+        if raw_metrics:
             st.divider()
             st.caption("**Latency per agent (s)**")
-            cols = st.columns(len(metrics))
-            for col, (agent, m) in zip(cols, metrics.items()):
+            cols = st.columns(len(raw_metrics))
+            for col, (agent, m) in zip(cols, raw_metrics.items()):
                 if isinstance(m, dict):
                     col.metric(agent, f"{m.get('latency_s', '?')}s")
         st.stop()
