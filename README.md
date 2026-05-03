@@ -223,9 +223,3 @@ tests/
 ```
 
 ---
-
-## Контакты
-
-Проект сделан в рамках перехода в направление AI / MAS.
-
-[Telegram](https://t.me/kir_ngv) · [career@nagayev.ru](mailto:career@nagayev.ru)
