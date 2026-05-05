@@ -1,0 +1,87 @@
+{
+  "version": "4",
+  "groupKey": "{}:{alertname=\"KeycloakAuthDegradation\"}",
+  "truncatedAlerts": 0,
+  "status": "firing",
+  "receiver": "incident-autopilot-webhook",
+  "groupLabels": {
+    "alertname": "KeycloakAuthDegradation"
+  },
+  "commonLabels": {
+    "alertname": "KeycloakAuthDegradation",
+    "env": "production",
+    "namespace": "auth",
+    "service": "keycloak",
+    "severity": "high",
+    "team": "platform-security"
+  },
+  "commonAnnotations": {
+    "summary": "Keycloak authentication severely degraded, p99 latency 8s",
+    "description": "Keycloak response time p99 increased from 200ms baseline to 8000ms. 12% of login requests returning 504. Root cause suspected: sessions table bloat (50M+ expired records).",
+    "runbook_url": "https://wiki.internal/runbooks/keycloak-performance"
+  },
+  "externalURL": "https://alertmanager.internal",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "KeycloakAuthDegradation",
+        "env": "production",
+        "namespace": "auth",
+        "service": "keycloak",
+        "severity": "high"
+      },
+      "annotations": {
+        "summary": "Keycloak auth latency critical",
+        "description": "keycloak_response_time_p99_ms=8000, baseline_ms=200, http_504_rate=0.12, db_connections=95/100"
+      },
+      "startsAt": "2026-04-22T06:40:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "https://prometheus.internal/graph?g0.expr=keycloak_request_duration_seconds",
+      "fingerprint": "f6a1b2c3d4e5f6a1"
+    },
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "PostgresHighConnections",
+        "env": "production",
+        "instance": "postgres-keycloak:5432",
+        "namespace": "auth",
+        "severity": "high"
+      },
+      "annotations": {
+        "summary": "PostgreSQL connections near limit for keycloak database",
+        "description": "keycloak_db connections: 95/100. Long-running queries detected: sequential scan on USER_SESSION table (52M rows)."
+      },
+      "startsAt": "2026-04-22T06:38:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "https://prometheus.internal/graph?g0.expr=pg_connections_active",
+      "fingerprint": "a1b2c3d4e5f6a1b3"
+    }
+  ],
+  "incident_context": {
+    "incident_id": "INC-2026-0422-004",
+    "detected_at": "2026-04-22T06:40:00Z",
+    "affected_services": ["keycloak", "api-gateway", "all-authenticated-services"],
+    "recent_changes": [],
+    "current_metrics": {
+      "keycloak_response_time_p50_ms": 2100,
+      "keycloak_response_time_p95_ms": 6800,
+      "keycloak_response_time_p99_ms": 8000,
+      "keycloak_baseline_p99_ms": 200,
+      "http_504_rate": 0.12,
+      "db_connections_active": 95,
+      "db_connections_max": 100,
+      "user_session_table_rows": 52000000,
+      "expired_sessions_rows": 48700000,
+      "db_query_avg_duration_ms": 4200,
+      "token_refresh_failures_per_minute": 340
+    },
+    "business_impact": {
+      "affected_users_estimate": 12000,
+      "login_failures_per_minute": 41,
+      "service_degraded": true,
+      "all_services_impacted": true
+    }
+  }
+}

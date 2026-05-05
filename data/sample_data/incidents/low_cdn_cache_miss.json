@@ -1,0 +1,70 @@
+{
+  "version": "4",
+  "groupKey": "{}:{alertname=\"CDNCacheHitRateLow\"}",
+  "status": "firing",
+  "receiver": "incident-autopilot-webhook",
+  "groupLabels": {"alertname": "CDNCacheHitRateLow"},
+  "commonLabels": {
+    "alertname": "CDNCacheHitRateLow",
+    "env": "production",
+    "namespace": "frontend",
+    "service": "frontend-cdn",
+    "severity": "low",
+    "team": "frontend-platform"
+  },
+  "commonAnnotations": {
+    "summary": "CDN cache hit rate dropped from 94% to 31% after frontend deploy",
+    "description": "After v3.8.0 deploy, content-hash filenames changed but Cache-Control headers were not updated. Origin load tripled. Users experiencing slower page loads.",
+    "runbook_url": "https://wiki.internal/runbooks/cdn-cache-invalidation"
+  },
+  "externalURL": "https://alertmanager.internal",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "CDNCacheHitRateLow",
+        "env": "production",
+        "namespace": "frontend",
+        "service": "frontend-cdn",
+        "severity": "low"
+      },
+      "annotations": {
+        "summary": "CDN cache hit rate critically low after deploy",
+        "description": "cdn_cache_hit_ratio=0.31, baseline=0.94, origin_rps=847, baseline_origin_rps=280, frontend_version=v3.8.0"
+      },
+      "startsAt": "2026-04-22T10:15:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "fingerprint": "d4e5f6a1b2c3d4e6"
+    }
+  ],
+  "incident_context": {
+    "incident_id": "INC-2026-0422-007",
+    "detected_at": "2026-04-22T10:15:00Z",
+    "affected_services": ["frontend-cdn", "react-spa"],
+    "recent_changes": [
+      {
+        "type": "deployment",
+        "service": "frontend-cdn",
+        "version": "v3.8.0",
+        "deployed_at": "2026-04-22T10:00:00Z",
+        "deployed_by": "ci-cd-pipeline",
+        "commit": "feat: add dark mode support + dashboard redesign"
+      }
+    ],
+    "current_metrics": {
+      "cdn_cache_hit_ratio": 0.31,
+      "cdn_cache_hit_ratio_baseline": 0.94,
+      "origin_requests_per_second": 847,
+      "origin_requests_per_second_baseline": 280,
+      "page_load_time_p95_ms": 4200,
+      "page_load_time_p95_baseline_ms": 1100,
+      "cache_control_max_age_seconds": 0,
+      "expected_cache_control_max_age_seconds": 31536000
+    },
+    "business_impact": {
+      "origin_overload_risk": false,
+      "user_experience_degraded": true,
+      "page_load_increase_x": 3.8
+    }
+  }
+}
